@@ -1,0 +1,31 @@
+# Configuración de OpenSSL para PHP en Windows.
+#
+# - PHP en Windows necesita un openssl.cnf para generar llaves (openssl_pkey_new),
+#   lo que usa LibreDTE, por ejemplo, para crear CAF de prueba.
+# - Se activa el proveedor "legacy" porque los certificados .p12/.pfx que se usan
+#   con el SII suelen venir cifrados con 40BitRC2, que OpenSSL 3 ya no soporta por
+#   defecto. Ver: https://core.libredte.cl/docs/lib/legacy-openssl
+#
+# Se usa definiendo la variable de entorno OPENSSL_CONF con la ruta a este archivo.
+
+openssl_conf = openssl_init
+
+[openssl_init]
+providers = provider_sect
+
+[provider_sect]
+default = default_sect
+legacy = legacy_sect
+
+[default_sect]
+activate = 1
+
+[legacy_sect]
+activate = 1
+
+[req]
+default_bits = 2048
+default_md = sha256
+distinguished_name = req_distinguished_name
+
+[req_distinguished_name]

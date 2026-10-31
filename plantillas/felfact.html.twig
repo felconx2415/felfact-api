@@ -1,0 +1,303 @@
+{#
+  Plantilla FelFact (FelServ) para DTE: facturas, boletas y notas de crédito/débito.
+  Diseño con los colores de felserv.cl; respeta lo exigido por el SII en la representación
+  impresa: recuadro rojo con RUT, tipo y folio, unidad del SII bajo el recuadro, timbre
+  electrónico con la resolución, acuse de recibo y leyenda CEDIBLE en la copia cedible.
+  Variables: document, document_stamp, document_auth y options.renderer (logo, marca, web,
+  sii_unidad, verificacion, presentation), que entrega la API (Acciones::opcionesPdf).
+  Las boletas no se verifican en el SII: se imprime el sitio de verificación del emisor (verificacion).
+#}
+{% set E = document.Encabezado %}
+{% set tipo = E.IdDoc.TipoDTE | number_format(0, '', '') %}
+{% set R = options.renderer ?? {} %}
+{% set esCedible = R.presentation is defined and R.presentation == 'cedible' %}
+{% set otraMoneda = E.Totales.TpoMoneda is not empty and E.Totales.TpoMoneda == 'DOLAR USA' %}
+{% set EM = R.emisor ?? {} %}
+{# Hora de emisión: la de la firma del documento (TmstFirma) #}
+{% set hora = (document_xml is defined and '<TmstFirma>' in document_xml) ? (document_xml | split('<TmstFirma>') | last | split('</TmstFirma>') | first) : null %}
+{% macro n(v, dec) %}{{ v | number_format(dec ?? 0, ',', '.') }}{% endmacro %}
+{% macro q(v) %}{% if v == (v | round) %}{{ v | number_format(0, ',', '.') }}{% else %}{{ v | number_format(2, ',', '.') | trim('0', 'right') | trim(',', 'right') }}{% endif %}{% endmacro %}
+{% import _self as f %}
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+    body { font-family: Arial, sans-serif; font-size: 9pt; color: #1e1e1e; margin: 0; padding: 0; }
+    p { margin: 0; }
+    table { border-collapse: collapse; }
+    .ancho { width: 100%; }
+    .tenue { color: #5a6270; }
+    .r { text-align: right; }
+    .c { text-align: center; }
+
+    /* Cabecera (bloques flotantes: mPDF dibuja mal bordes de bloques dentro de celdas) */
+    .cab-izq { float: left; width: 56%; }
+    .cab-der { float: right; width: 40%; }
+    .marca-img { height: 13mm; max-width: 80mm; }
+    .marca-txt { padding-left: 3mm; vertical-align: middle; }
+    .marca-nombre { font-size: 17pt; font-weight: bold; color: #1e1e1e; }
+    .marca-web { font-size: 8pt; color: #0066ff; font-weight: bold; }
+    .razon { font-size: 12.5pt; font-weight: bold; color: #0047b3; margin-top: 3mm; }
+    .giro { font-size: 8pt; font-weight: bold; text-transform: uppercase; margin-top: 1mm; }
+    .dir { font-size: 8pt; color: #5a6270; margin-top: 1mm; }
+    .recuadro { border: 0.7mm solid #e3000f; color: #e3000f; text-align: center; font-weight: bold; padding: 2.5mm 2mm; }
+    .recuadro .rut { font-size: 13pt; }
+    .recuadro .tipo { font-size: 11.5pt; text-transform: uppercase; padding: 1.5mm 0; }
+    .recuadro .folio { font-size: 13pt; }
+    .sucursal { color: #e3000f; font-weight: bold; text-align: center; font-size: 9.5pt; margin-top: 2mm; text-transform: uppercase; }
+    .barra { height: 1.2mm; background: linear-gradient(90deg, #0047b3, #0066ff 50%, #00e5ff); margin: 4mm 0 3.5mm 0; }
+
+    /* Cajas */
+    .caja { border: 0.3mm solid #e1e4ea; border-radius: 2.5mm; padding: 2mm 3mm; }
+    .datos td { padding: 1mm 1mm; vertical-align: top; font-size: 8.5pt; }
+    .et { font-weight: bold; color: #1e1e1e; white-space: nowrap; }
+    .dp { color: #5a6270; }
+
+    /* Detalle */
+    .caja-det { border: 0.3mm solid #e1e4ea; margin-top: 3.5mm; padding: 0; }
+    .detalle td.relleno { border-bottom: none; }
+    .detalle th { background-color: #0066ff; color: #ffffff; font-weight: bold; font-size: 8.5pt; padding: 1.8mm 1.5mm; text-align: left; }
+    .detalle td { padding: 1.6mm 1.5mm; border-bottom: 0.2mm solid #e1e4ea; font-size: 8.5pt; vertical-align: top; }
+    .detalle th.r { text-align: right; }
+    .detalle th.c { text-align: center; }
+    .detalle tr.par td { background-color: #f3f5f8; }
+    .dsc-item { font-size: 7pt; color: #5a6270; }
+    .ex { font-size: 7pt; font-weight: bold; color: #0047b3; }
+    .globales td { padding: 1mm 1.5mm; font-size: 8.5pt; }
+
+    /* Pie del documento */
+    .bajo { margin-top: 5mm; }
+    .col-izq { float: left; width: 33%; margin-right: 4%; }
+    .col-centro { float: left; width: 29%; margin-right: 4%; }
+    .col-der { float: right; width: 30%; }
+    .titulo-caja { font-weight: bold; font-size: 8pt; color: #0047b3; text-transform: uppercase; padding-bottom: 1mm; }
+    .refs td { font-size: 7.5pt; padding: 0.6mm 0; vertical-align: top; }
+    .timbre { margin-top: 3mm; text-align: center; }
+    .img-timbre { width: 60mm; height: 30mm; }
+    .timbre-txt { font-size: 7.5pt; text-align: center; line-height: 1.25; }
+    .acuse td { font-size: 8pt; padding: 1.4mm 1mm; border-bottom: 0.2mm solid #e1e4ea; }
+    .acuse .acuse-t { background-color: #f3f5f8; font-weight: bold; text-align: center; border-bottom: 0.2mm solid #e1e4ea; }
+    .acuse-ley { font-size: 6.5pt; color: #5a6270; text-align: left; margin-top: 1.5mm; }
+    .totales td { font-size: 9pt; padding: 1.4mm 2mm; border-bottom: 0.2mm solid #e1e4ea; }
+    .totales .total td { background-color: #0066ff; color: #ffffff; font-weight: bold; font-size: 10.5pt; border-bottom: none; }
+    .cedible { font-size: 12pt; font-weight: bold; text-align: right; margin-top: 4mm; letter-spacing: 1px; }
+    .obs { font-size: 8pt; margin-top: 3mm; }
+    .pie { position: fixed; bottom: 3mm; left: 5mm; right: 5mm; border-top: 0.2mm solid #e1e4ea; padding-top: 1.5mm; font-size: 7pt; color: #5a6270; }
+    .pie b { color: #0066ff; }
+</style>
+</head>
+<body>
+
+{# ---------- Cabecera: marca y emisor | recuadro SII ---------- #}
+<div class="cab-izq">
+        {% if R.logo is defined and R.logo %}
+        <table><tr>
+            <td><img class="marca-img" src="{{ R.logo }}" alt="Logo"></td>
+            <td class="marca-txt">
+                <div class="marca-nombre">{{ R.marca ?? '' }}</div>
+                {% if R.web is defined and R.web %}<div class="marca-web">{{ R.web }}</div>{% endif %}
+            </td>
+        </tr></table>
+        {% endif %}
+        <div class="razon">{{ E.Emisor.RznSoc | default(E.Emisor.RznSocEmisor) }}</div>
+        <div class="giro">{{ E.Emisor.GiroEmis | default(E.Emisor.GiroEmisor) }}</div>
+        <div class="dir">
+            <b>Casa Matriz:</b> {{ [E.Emisor.DirOrigen, E.Emisor.CmnaOrigen, E.Emisor.CiudadOrigen | default(EM.ciudad ?? '')] | filter(v => v is not empty) | join(', ') }}
+            {% set fono = E.Emisor.Telefono is iterable ? E.Emisor.Telefono | join(' / ') : E.Emisor.Telefono %}
+            {% set fono = fono | default(EM.telefono ?? '') %}
+            {% set correo = E.Emisor.CorreoEmisor | default(EM.email ?? '') %}
+            {% if fono or correo %}<br>{% if fono %}<b>Fono:</b> {{ fono }}{% endif %}{% if fono and correo %} · {% endif %}{% if correo %}<b>Email:</b> {{ correo }}{% endif %}{% endif %}
+        </div>
+</div>
+<div class="cab-der">
+    <div class="recuadro">
+        <p class="rut">R.U.T.: {{ E.Emisor.RUTEmisor | format_as('billing_document.RUTEmisor') }}</p>
+        <p class="tipo">{{ E.IdDoc.TipoDTE | format_as('billing_document.TipoDTE') | upper }}</p>
+        <p class="folio">N° {{ E.IdDoc.Folio }}</p>
+    </div>
+    <p class="sucursal">S.I.I. - {% if R.sii_unidad is defined and R.sii_unidad %}{{ R.sii_unidad }}{% else %}{{ E.Emisor.CmnaOrigen | format_as('billing_document.CdgSIISucur') | upper }}{% endif %}</p>
+</div>
+<div style="clear: both;"></div>
+<div class="barra"></div>
+
+{# ---------- Receptor y datos del documento ---------- #}
+{% set izq = [] %}
+{% if E.Receptor.RznSocRecep is not empty %}{% set izq = izq | merge([['Señor(es)', E.Receptor.RznSocRecep]]) %}{% endif %}
+{% if E.Receptor.RUTRecep is not empty and E.Receptor.RUTRecep != '66666666-6' %}{% set izq = izq | merge([['R.U.T.', E.Receptor.RUTRecep | format_as('billing_document.RUTRecep')]]) %}{% endif %}
+{% if E.Receptor.GiroRecep is not empty %}{% set izq = izq | merge([['Giro', E.Receptor.GiroRecep]]) %}{% endif %}
+{% if E.Receptor.DirRecep is not empty %}{% set izq = izq | merge([['Dirección', E.Receptor.DirRecep]]) %}{% endif %}
+{% if E.Receptor.CmnaRecep is not empty %}{% set izq = izq | merge([['Comuna', E.Receptor.CmnaRecep]]) %}{% endif %}
+{% if E.Receptor.CiudadRecep is not empty %}{% set izq = izq | merge([['Ciudad', E.Receptor.CiudadRecep]]) %}{% endif %}
+{% set der = [['Fecha emisión', E.IdDoc.FchEmis | date('d/m/Y')]] %}
+{% if hora %}{% set der = der | merge([['Hora emisión', hora | date('H:i:s')]]) %}{% endif %}
+{% if E.IdDoc.FchVenc is not empty %}{% set der = der | merge([['Vencimiento', E.IdDoc.FchVenc | date('d/m/Y')]]) %}{% endif %}
+{% if E.IdDoc.PeriodoDesde is not empty and E.IdDoc.PeriodoHasta is not empty %}{% set der = der | merge([['Período', (E.IdDoc.PeriodoDesde | date('d/m/Y')) ~ ' al ' ~ (E.IdDoc.PeriodoHasta | date('d/m/Y'))]]) %}{% endif %}
+{% if E.IdDoc.FmaPago is not empty %}{% set der = der | merge([['Condiciones de pago',E.IdDoc.FmaPago | format_as('billing_document.FmaPago')]]) %}{% endif %}
+{% if E.IdDoc.MedioPago is not empty %}{% set der = der | merge([['Medio de pago', E.IdDoc.MedioPago | format_as('billing_document.MedioPago')]]) %}{% endif %}
+{% set vendedor = E.Emisor.CdgVendedor | default(EM.vendedor ?? '') %}
+{% if vendedor %}{% set der = der | merge([['Vendedor', vendedor]]) %}{% endif %}
+{% if E.Receptor.Contacto is not empty %}{% set der = der | merge([['Contacto', E.Receptor.Contacto]]) %}{% endif %}
+{% if E.Receptor.CorreoRecep is not empty %}{% set der = der | merge([['Correo', E.Receptor.CorreoRecep]]) %}{% endif %}
+<div class="caja">
+<table class="ancho datos">
+{% for i in 0..(max(izq | length, der | length) - 1) %}
+<tr>
+    <td class="et" style="width: 17%;">{{ izq[i][0] ?? '' }}</td>
+    <td style="width: 45%;">{% if izq[i] is defined %}{{ izq[i][1] }}{% endif %}</td>
+    <td class="et" style="width: 17%;">{{ der[i][0] ?? '' }}</td>
+    <td style="width: 21%;">{% if der[i] is defined %}{{ der[i][1] }}{% endif %}</td>
+</tr>
+{% endfor %}
+</table>
+</div>
+
+{# ---------- Detalle: columnas fijas como la factura de Facto, en un recuadro de alto mínimo ---------- #}
+{% set detalles = document.Detalle ?? [] %}
+{% set afectoIva = tipo not in ['34', '41'] %}
+<div class="caja-det">
+<table class="ancho detalle">
+    <thead><tr>
+        <th>Glosa</th>
+        <th class="r" style="width: 10%;">Cantidad</th>
+        <th class="r" style="width: 12%;">Prc. Unit.</th>
+        <th class="r" style="width: 11%;">Desc/Rcrg</th>
+        <th class="c" style="width: 10%;">Afecto IVA</th>
+        <th class="c" style="width: 9%;">Imp. Esp.</th>
+        <th class="r" style="width: 13%;">Monto</th>
+    </tr></thead>
+    <tbody>
+    {% set subtotal = 0 %}
+    {% set lineas = 0 %}
+    {% for d in detalles %}
+    <tr class="{{ loop.index is even ? 'par' : '' }}">
+        <td>
+            {% if d.CdgItem is defined and d.CdgItem is not empty and d.CdgItem.VlrCodigo is defined %}<span class="tenue">{{ d.CdgItem.VlrCodigo }}</span> {% endif %}{{ d.NmbItem ?? '' }}
+            {% if d.DscItem is defined and d.DscItem is not empty %}<div class="dsc-item">{{ d.DscItem }}</div>{% set lineas = lineas + 1 %}{% endif %}
+        </td>
+        <td class="r">{% if d.QtyItem is defined and d.QtyItem is not empty %}{{ f.q(d.QtyItem) }}{% if d.UnmdItem is defined and d.UnmdItem is not empty %} {{ d.UnmdItem }}{% endif %}{% endif %}</td>
+        <td class="r">{% if d.PrcItem is defined and d.PrcItem is not empty %}$ {{ f.q(d.PrcItem) }}{% endif %}</td>
+        <td class="r">
+            {% if d.DescuentoPct is defined and d.DescuentoPct is not empty %}{{ d.DescuentoPct }}%{% if d.DescuentoMonto is defined and d.DescuentoMonto is not empty %}<div class="dsc-item">-$ {{ f.n(d.DescuentoMonto) }}</div>{% endif %}
+            {% elseif d.DescuentoMonto is defined and d.DescuentoMonto is not empty %}-$ {{ f.n(d.DescuentoMonto) }}{% endif %}
+            {% if d.RecargoPct is defined and d.RecargoPct is not empty %}+{{ d.RecargoPct }}%{% if d.RecargoMonto is defined and d.RecargoMonto is not empty %}<div class="dsc-item">+$ {{ f.n(d.RecargoMonto) }}</div>{% endif %}
+            {% elseif d.RecargoMonto is defined and d.RecargoMonto is not empty %}+$ {{ f.n(d.RecargoMonto) }}{% endif %}
+        </td>
+        <td class="c">{% if d.IndExe is defined and d.IndExe == 1 %}<span class="ex">NO (EXENTO)</span>{% elseif d.IndExe is defined and d.IndExe == 2 %}<span class="ex">NO FACT.</span>{% elseif afectoIva %}SI{% else %}NO{% endif %}</td>
+        <td class="c">{% if d.CodImpAdic is defined and d.CodImpAdic is not empty %}{{ d.CodImpAdic is iterable ? d.CodImpAdic | join(', ') : d.CodImpAdic }}{% endif %}</td>
+        <td class="r">{% if d.MontoItem is not empty %}$ {{ f.n(d.MontoItem) }}{% endif %}</td>
+    </tr>
+    {% if d.MontoItem is not empty %}{% set subtotal = subtotal + d.MontoItem %}{% endif %}
+    {% set lineas = lineas + 1 %}
+    {% endfor %}
+    {# Relleno hasta un alto mínimo, como el recuadro de detalle de la factura de Facto #}
+    {# ...descontando lo que va debajo para que todo quepa en una hoja: acuse (cedible), descuentos
+       globales, observación, referencias adicionales y filas extra del cliente #}
+    {% set objetivo = 14
+        - (esCedible ? 3 : 0)
+        - (document.DscRcgGlobal is not empty ? 2 + (document.DscRcgGlobal | length) : 0)
+        - (E.IdDoc.TermPagoGlosa is not empty ? 1 : 0)
+        - max(0, (document.Referencia ?? []) | length - 1)
+        - max(0, max(izq | length, der | length) - 5) %}
+    {% if lineas < objetivo %}
+    <tr><td colspan="7" class="relleno" style="height: {{ (objetivo - lineas) * 6.5 }}mm;">&nbsp;</td></tr>
+    {% endif %}
+    </tbody>
+</table>
+</div>
+{# Descuentos y recargos globales #}
+{% if document.DscRcgGlobal is not empty %}
+<table class="globales" style="margin-left: auto; margin-top: 2mm;">
+    <tr><td class="r et">Subtotal</td><td class="r" style="width: 30mm;">$ {{ f.n(subtotal) }}</td></tr>
+    {% for g in document.DscRcgGlobal %}
+    {% set esD = (g.TpoMov | trim | upper) == 'D' %}
+    <tr>
+        <td class="r et">{{ esD ? 'Descuento' : 'Recargo' }}{% if g.IndExeDR is defined and g.IndExeDR is not empty %} exento{% endif %}{% if g.GlosaDR is not empty %} <span class="dp">({{ g.GlosaDR }})</span>{% endif %}</td>
+        <td class="r">{% if (g.TpoValor | trim) == '%' %}{{ g.ValorDR }}%{% else %}{{ esD ? '-' : '+' }}$ {{ f.n(g.ValorDR) }}{% endif %}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+{# Observación (p. ej. N° de orden) #}
+{% if E.IdDoc.TermPagoGlosa is not empty %}
+<div class="obs"><b>Observación:</b> {{ E.IdDoc.TermPagoGlosa }}</div>
+{% endif %}
+
+{# ---------- Referencias + timbre | acuse | totales ---------- #}
+{% set codRef = {'1': 'Anula documento', '2': 'Corrige texto', '3': 'Corrige montos'} %}
+<div class="bajo">
+<div class="col-izq">
+        {% if document.Referencia is not empty %}
+        <div class="caja">
+            <div class="titulo-caja">Referencias</div>
+            <table class="ancho refs">
+            {% for ref in document.Referencia %}
+            <tr><td>
+                <b>{% if ref.TpoDocRef == 'SET' %}SET{% elseif ref.TpoDocRef is not empty %}{{ ref.TpoDocRef | format_as('billing_document.TpoDocRef') }}{% endif %}{% if ref.FolioRef is defined and ref.FolioRef is not empty and (ref.IndGlobal ?? 0) != 1 %} N° {{ ref.FolioRef }}{% endif %}</b>{% if ref.FchRef is not empty %} del {{ ref.FchRef | date('d/m/Y') }}{% endif %}
+                {% if ref.CodRef is defined and ref.CodRef is not empty and codRef[ref.CodRef ~ ''] is defined %}<br><span class="dp">{{ codRef[ref.CodRef ~ ''] }}</span>{% endif %}
+                {% if ref.RazonRef is not empty %}<br>{{ ref.RazonRef }}{% endif %}
+            </td></tr>
+            {% endfor %}
+            </table>
+        </div>
+        {% endif %}
+        {% if document_stamp is not empty %}
+        <div class="timbre">
+            <img class="img-timbre" src="{{ document_stamp | format_as('billing_document.TED') }}" alt="Timbre electrónico">
+            <div class="timbre-txt">
+                <b>Timbre Electrónico S.I.I.</b><br>
+                {% if document_auth is not empty %}Res. Ex. S.I.I. N° {{ document_auth.NroResol }} de {{ document_auth.FchResol | format_as('billing_document.FchResol') }} · {% endif %}Verifique documento en {{ tipo in ['39', '41'] and R.verificacion is not empty ? R.verificacion : 'www.sii.cl' }}
+            </div>
+        </div>
+        {% endif %}
+</div>
+<div class="col-centro">
+        {% if esCedible %}
+        <div class="caja" style="padding: 0;">
+            <table class="ancho acuse">
+                <tr><td colspan="2" class="acuse-t">ACUSE DE RECIBO</td></tr>
+                <tr><td class="et" style="width: 32%;">Nombre:</td><td></td></tr>
+                <tr><td class="et">R.U.T.:</td><td></td></tr>
+                <tr><td class="et">Fecha:</td><td></td></tr>
+                <tr><td class="et">Recinto:</td><td></td></tr>
+                <tr><td class="et" style="border-bottom: none;">Firma:</td><td style="border-bottom: none;"></td></tr>
+            </table>
+        </div>
+        <div class="acuse-ley">El acuse de recibo que se declara en este acto, de acuerdo a lo dispuesto en la letra b) del Art. 4°, y la letra c) del Art. 5° de la Ley 19.983, acredita que la entrega de mercaderías o servicio(s) prestado(s) ha(n) sido recibido(s).</div>
+        {% endif %}
+        &nbsp;
+</div>
+<div class="col-der">
+        {% set filas = [] %}
+        {# Neto, exento e IVA siempre, como en la factura de Facto (vacío si no hay monto) #}
+        {% set filas = filas | merge([['Monto neto', E.Totales.MntNeto ?? null], ['Monto exento', E.Totales.MntExe ?? null]]) %}
+        {% set filas = filas | merge([['IVA ' ~ (E.Totales.TasaIVA is not empty ? E.Totales.TasaIVA : '19') ~ '%', E.Totales.IVA ?? null]]) %}
+        {% if E.Totales.IVANoRet is not empty %}{% set filas = filas | merge([['IVA no retenido', E.Totales.IVANoRet]]) %}{% endif %}
+        {% if E.Totales.CredEC is not empty %}{% set filas = filas | merge([['Desc. 65% IVA', E.Totales.CredEC]]) %}{% endif %}
+        {% for imp in (E.Totales.ImptoReten ?? []) %}{% set filas = filas | merge([[(imp.TipoImp | format_as('billing_document.TipoImp')) ~ (imp.TasaImp is not empty ? ' ' ~ imp.TasaImp ~ '%' : ''), imp.MontoImp]]) %}{% endfor %}
+        {% if E.Totales.MontoNF is not empty %}{% set filas = filas | merge([['No facturable', E.Totales.MontoNF]]) %}{% endif %}
+        <div class="caja" style="padding: 0; border-radius: 0;">
+            <table class="ancho totales">
+                {% for t in filas %}
+                <tr><td class="et">{{ t[0] }}</td><td class="r">{% if t[1] is not empty %}$ {{ f.n(t[1], otraMoneda ? 2 : 0) }}{% endif %}</td></tr>
+                {% endfor %}
+                <tr class="total"><td>Total</td><td class="r">$ {{ f.n(E.Totales.MntTotal, otraMoneda ? 2 : 0) }}</td></tr>
+            </table>
+        </div>
+        {% if E.Totales.TpoMoneda is not empty %}<div class="tenue r" style="font-size: 7.5pt; margin-top: 1mm;">Moneda: {{ E.Totales.TpoMoneda }}</div>{% endif %}
+        {% if esCedible %}
+        <p class="cedible">{{ tipo in ['52', '56', '61'] ? 'CEDIBLE CON SU FACTURA' : 'CEDIBLE' }}</p>
+        {% endif %}
+</div>
+<div style="clear: both;"></div>
+</div>
+
+<div class="pie">
+    <table class="ancho"><tr>
+        <td>Documento tributario electrónico emitido con <b>FelFact</b></td>
+        <td class="r">{{ R.web ?? '' }}</td>
+    </tr></table>
+</div>
+
+</body>
+</html>

@@ -1,0 +1,25 @@
+# Configuración de LibreDTE cuando se usa como dependencia de Composer.
+#
+# LibreDTE carga config/services.yaml desde el proyecto raíz de Composer (este
+# proyecto). Por eso aquí se importa la configuración de la biblioteca y se
+# indica dónde están sus recursos (plantillas, datos, etc.), que de otra forma
+# se buscarían en la raíz de este proyecto.
+# Es el mismo patrón que usa libredte-lib-core-dispatcher.
+imports:
+  - { resource: '../vendor/libredte/libredte-lib-core/config/services.yaml' }
+
+parameters:
+    libredte.lib.core.project_dir: '%kernel.project_dir%/vendor/libredte/libredte-lib-core'
+
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+        public: false
+
+    # Reemplazan a FakeEmisorProvider y FakeReceptorProvider de la biblioteca,
+    # que completan los datos faltantes con datos de ejemplo.
+    libredte\lib\Core\Package\Billing\Component\TradingParties\Contract\EmisorProviderInterface:
+        class: FelServ\LibreDteWorker\EmisorProvider
+    libredte\lib\Core\Package\Billing\Component\TradingParties\Contract\ReceptorProviderInterface:
+        class: FelServ\LibreDteWorker\ReceptorProvider

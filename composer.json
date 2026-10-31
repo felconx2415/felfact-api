@@ -1,0 +1,25 @@
+{
+    "name": "felserv/felfact-api",
+    "description": "API HTTP para emitir documentos tributarios electrónicos en Chile, sobre LibreDTE",
+    "type": "project",
+    "license": "AGPL-3.0-or-later",
+    "require": {
+        "php": "^8.5",
+        "ext-curl": "*",
+        "ext-json": "*",
+        "ext-mbstring": "*",
+        "ext-openssl": "*",
+        "ext-soap": "*",
+        "libredte/libredte-lib-core": "dev-master"
+    },
+    "autoload": {
+        "psr-4": {
+            "FelServ\\LibreDteWorker\\": "src/"
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "config": {
+        "optimize-autoloader": true
+    }
+}
