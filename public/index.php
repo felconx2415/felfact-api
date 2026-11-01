@@ -16,6 +16,7 @@ ini_set('display_errors', '0');
 require dirname(__DIR__) . '/vendor/autoload.php';
 
 use FelServ\LibreDteWorker\Acciones;
+use FelServ\LibreDteWorker\Emisores;
 
 function responder(int $codigo, array $respuesta): never
 {
@@ -43,12 +44,20 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
     responder(405, ['ok' => false, 'error' => 'Método no permitido.']);
 }
 
+// Dos formas de entrar: el token único de la instalación, con su certificado, o el token de un
+// emisor, que solo puede firmar con su propio certificado y por su propio RUT.
 $token = (string) getenv('LIBREDTE_API_TOKEN');
-if (strlen($token) < 32) {
+$enviado = (string) ($_SERVER['HTTP_X_API_TOKEN'] ?? '');
+$emisores = new Emisores((string) getenv('FELFACT_EMISORES'));
+if (strlen($token) < 32 && !$emisores->activo()) {
     responder(500, ['ok' => false, 'error' => 'La API no tiene token configurado.']);
 }
-if (!hash_equals($token, (string) ($_SERVER['HTTP_X_API_TOKEN'] ?? ''))) {
-    responder(401, ['ok' => false, 'error' => 'Token inválido.']);
+$emisor = null;
+if (strlen($token) < 32 || !hash_equals($token, $enviado)) {
+    $emisor = $emisores->porToken($enviado);
+    if ($emisor === null) {
+        responder(401, ['ok' => false, 'error' => 'Token inválido.']);
+    }
 }
 
 if (!preg_match('#^v1/([a-z_]+)$#', $ruta, $m)) {
@@ -63,9 +72,10 @@ if (!is_array($in)) {
 
 try {
     $acciones = new Acciones(
-        (string) getenv('LIBREDTE_CERTIFICADO'),
-        (string) getenv('LIBREDTE_CERTIFICADO_CLAVE'),
-        (string) getenv('LIBREDTE_CLAVE_MAESTRA')
+        $emisor['certificado'] ?? (string) getenv('LIBREDTE_CERTIFICADO'),
+        $emisor === null ? (string) getenv('LIBREDTE_CERTIFICADO_CLAVE') : '',
+        (string) getenv('LIBREDTE_CLAVE_MAESTRA'),
+        $emisor['rut'] ?? null
     );
     responder(200, ['ok' => true] + $acciones->ejecutar($m[1], $in));
 } catch (Throwable $e) {

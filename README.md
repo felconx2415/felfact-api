@@ -30,7 +30,23 @@ docker build -t felfact-api .
 docker run -d --env-file .env -e LIBREDTE_CERTIFICADO=/privado/certificado.p12 -v "$PWD/privado:/privado" felfact-api
 ```
 
-Protege el acceso con un proxy: la API no debe quedar expuesta a internet sin restricción de origen.
+Publícala detrás de un proxy con https. El acceso único debe limitarse por origen; los emisores pueden entrar desde cualquier red, protegidos por su token.
+
+## Varios emisores
+
+Define `FELFACT_EMISORES` con una carpeta persistente y crea un emisor por RUT:
+
+```bash
+php bin/emisor.php crear 12345678-5 "Mi Empresa SpA"   # muestra el token una sola vez
+php bin/emisor.php revocar 12345678-5
+php bin/emisor.php listar
+```
+
+Cada emisor sube su certificado con `certificado_guardar`, usando su token. Ese token solo firma con ese certificado y solo opera por ese RUT: una instalación no puede emitir a nombre de otra. Sin marca propia, sus PDF no llevan logo ni marca. La clave del certificado se cifra con `LIBREDTE_CLAVE_MAESTRA`, así que esa llave no se puede cambiar sin volver a subir los certificados.
+
+`LIBREDTE_API_TOKEN` sigue funcionando como acceso único, con el certificado de `LIBREDTE_CERTIFICADO` y sin restricción de RUT. Si no se usa, puede quedar vacío.
+
+Con `sin_pdf: true`, `generar` responde más rápido y el PDF se pide después con la acción `pdf`.
 
 ## Licencia
 

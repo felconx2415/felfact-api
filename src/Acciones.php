@@ -35,12 +35,47 @@ class Acciones
      * @param string $certificadoRuta Ruta del .p12 (el directorio debe ser escribible para guardarlo).
      * @param string $claveEnv Clave del certificado por variable de entorno (si no se subió por la API).
      * @param string $claveMaestra Llave para cifrar la clave del certificado guardada en disco.
+     * @param string|null $rutEmisor Si viene, solo se puede operar por este RUT.
      */
     public function __construct(
         private string $certificadoRuta,
         private string $claveEnv,
-        private string $claveMaestra
+        private string $claveMaestra,
+        private ?string $rutEmisor = null
     ) {
+    }
+
+    /** Un token de emisor no puede firmar, enviar ni consultar por otro RUT. */
+    private function exigirRut(mixed $rut): void
+    {
+        if ($this->rutEmisor !== null && Emisores::normalizarRut((string) $rut) !== $this->rutEmisor) {
+            throw new RuntimeException("Este token solo puede operar por el RUT {$this->rutEmisor}.");
+        }
+    }
+
+    private function exigirRutDocumento(mixed $documento): void
+    {
+        $this->exigirRut(is_array($documento) ? ($documento['Encabezado']['Emisor']['RUTEmisor'] ?? '') : '');
+    }
+
+    /** RUT del emisor declarado en la carátula del sobre. */
+    private function exigirRutSobre(string $xml): void
+    {
+        if ($this->rutEmisor !== null) {
+            $this->exigirRut(preg_match('#<RutEmisor>([^<]+)</RutEmisor>#', $xml, $m) ? $m[1] : '');
+        }
+    }
+
+    private function controlarRut(string $accion, array $in): void
+    {
+        match ($accion) {
+            'generar' => $this->exigirRutDocumento($in['documento'] ?? null),
+            'generar_lote' => array_map(fn ($d) => $this->exigirRutDocumento($d['documento'] ?? null), array_filter((array) ($in['documentos'] ?? []), 'is_array')),
+            'generar_libro', 'estado' => $this->exigirRut($in['rut_emisor'] ?? ''),
+            'enviar' => [$this->exigirRut($in['rut_emisor'] ?? ''), $this->exigirRutSobre($this->archivo($in, 'sobre'))],
+            'intercambio' => $this->exigirRut($in['rut'] ?? ''),
+            default => null,
+        };
     }
 
     private function rutaClave(): string
@@ -99,6 +134,7 @@ class Acciones
     /** Ejecuta una acción y entrega su resultado. Lanza RuntimeException con un mensaje legible si falla. */
     public function ejecutar(string $accion, array $in): array
     {
+        $this->controlarRut($accion, $in);
         return match ($accion) {
             'caf_info' => $this->cafInfo($in),
             'generar' => $this->generar($in),
@@ -243,6 +279,7 @@ class Acciones
     private function emitirDocumento(array $data, string $cafXml, CertificateInterface $certificate)
     {
         $caf = $this->billing()->getIdentifierComponent()->getCafLoaderWorker()->load($cafXml);
+        $this->exigirRut($caf->getEmisor()['rut'] ?? '');
         $tipo = (int) ($data['Encabezado']['IdDoc']['TipoDTE'] ?? 0);
         $folio = (int) ($data['Encabezado']['IdDoc']['Folio'] ?? 0);
         if ($caf->getTipoDocumento() !== $tipo) {
@@ -497,11 +534,12 @@ class Acciones
             $logo = (string) ($in['pdf_logo'] ?? '');
             if (preg_match('#^data:image/(png|jpeg);base64,[A-Za-z0-9+/=]+$#', $logo) && strlen($logo) < 450000) {
                 $opciones->set('renderer.logo', $logo);
-            } elseif (is_file("$dir/felserv-marca.png")) {
+            } elseif ($this->rutEmisor === null && is_file("$dir/felserv-marca.png")) {
                 $opciones->set('renderer.logo', 'data:image/png;base64,' . base64_encode((string) file_get_contents("$dir/felserv-marca.png")));
             }
-            $opciones->set('renderer.marca', mb_substr(trim((string) ($in['pdf_marca'] ?? 'FelServ')), 0, 40, 'UTF-8'));
-            $opciones->set('renderer.web', mb_substr(trim((string) ($in['pdf_web'] ?? 'www.felserv.cl')), 0, 60, 'UTF-8'));
+            // La marca de FelServ no debe salir en los documentos de otros emisores
+            $opciones->set('renderer.marca', mb_substr(trim((string) ($in['pdf_marca'] ?? ($this->rutEmisor === null ? 'FelServ' : ''))), 0, 40, 'UTF-8'));
+            $opciones->set('renderer.web', mb_substr(trim((string) ($in['pdf_web'] ?? ($this->rutEmisor === null ? 'www.felserv.cl' : ''))), 0, 60, 'UTF-8'));
             // Sitio donde se verifican las boletas (lo exige el SII en su representación impresa)
             $opciones->set('renderer.verificacion', mb_substr(trim((string) ($in['pdf_verificacion'] ?? '')), 0, 80, 'UTF-8'));
         }
@@ -531,9 +569,12 @@ class Acciones
         $xml->loadXml($dte->saveXml());
         $totales = $xml->query('//Encabezado/Totales') ?? [];
 
-        // Boletas: el papel configurado para ellas (carta o rollo térmico); el resto, carta
+        // Boletas: el papel configurado para ellas (carta o rollo térmico); el resto, carta.
+        // sin_pdf evita generarlo cuando el cliente lo pedirá después con la acción pdf.
         $tipoDte = (int) $xml->query('//Encabezado/IdDoc/TipoDTE');
-        $pdf = current($this->renderizar($bag, ['papel' => in_array($tipoDte, [39, 41], true) ? ($in['papel_boleta'] ?? 'carta') : 'carta'] + $in));
+        $pdf = empty($in['sin_pdf'])
+            ? current($this->renderizar($bag, ['papel' => in_array($tipoDte, [39, 41], true) ? ($in['papel_boleta'] ?? 'carta') : 'carta'] + $in))
+            : null;
 
         return [
             'tipo' => (int) $xml->query('//Encabezado/IdDoc/TipoDTE'),
@@ -546,7 +587,7 @@ class Acciones
                 'total' => (int) ($totales['MntTotal'] ?? 0),
             ],
             'dte_xml' => base64_encode($dte->saveXml()),
-            'pdf' => base64_encode($pdf),
+            'pdf' => $pdf === null ? null : base64_encode($pdf),
         ];
     }
 
