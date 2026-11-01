@@ -28,6 +28,7 @@ COPY src ./src
 RUN composer install --no-dev --optimize-autoloader --no-interaction --no-progress \
  && rm /usr/bin/composer
 
+COPY bin ./bin
 COPY config ./config
 COPY public ./public
 COPY plantillas ./plantillas
