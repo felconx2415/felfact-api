@@ -25,14 +25,14 @@ class SiiFolios
 
     /** Respuestas del SII que impiden seguir, con el mensaje que se muestra. */
     const RECHAZOS = [
-        '/superado el m[aá]ximo/i' => 'El SII indica que hay demasiadas sesiones abiertas con este certificado. Espera unos 30 minutos.',
-        '/acceso restringido|recaptcha/i' => 'El SII bloqueó el acceso automático (protección del sitio). Pide los folios a mano por ahora.',
-        '/no registra Verificaci[oó]n de Actividades/i' => 'El SII indica que la empresa no tiene la verificación de actividades: debe regularizarla antes de pedir folios.',
-        '/NO\s+(SE\s+)?AUTORIZA\s+TIMBRAJE/i' => 'El SII no autoriza timbraje para esta empresa. Revisa su situación en el SII.',
-        '/situaciones\s+pendientes\s+con\s+el\s+SII/i' => 'El SII indica que hay situaciones pendientes con el SII: deben regularizarse antes de pedir folios.',
-        '/deber[aá] presentarse en la oficina del SII/i' => 'El SII pide hacer el trámite en una oficina del SII.',
-        '/empresa no est[aá] autorizada para operar/i' => 'El SII indica que la empresa no está autorizada para operar como emisor electrónico.',
-        '/no est[aá] autorizado para ingresar a esta opci[oó]n/i' => 'El usuario del certificado no tiene permiso para solicitar folios de esta empresa en el SII.',
+        '/superado el m[aá]ximo/iu' => 'El SII indica que hay demasiadas sesiones abiertas con este certificado. Espera unos 30 minutos.',
+        '/acceso restringido|recaptcha/iu' => 'El SII bloqueó el acceso automático (protección del sitio). Pide los folios a mano por ahora.',
+        '/no registra Verificaci[oó]n de Actividades/iu' => 'El SII indica que la empresa no tiene la verificación de actividades: debe regularizarla antes de pedir folios.',
+        '/NO\s+(SE\s+)?AUTORIZA\s+TIMBRAJE/iu' => 'El SII no autoriza timbraje para esta empresa. Revisa su situación en el SII.',
+        '/situaciones\s+pendientes\s+con\s+el\s+SII/iu' => 'El SII indica que hay situaciones pendientes con el SII: deben regularizarse antes de pedir folios.',
+        '/deber[aá] presentarse en la oficina del SII/iu' => 'El SII pide hacer el trámite en una oficina del SII.',
+        '/empresa no est[aá] autorizada para operar/iu' => 'El SII indica que la empresa no está autorizada para operar como emisor electrónico.',
+        '/no est[aá] autorizado para ingresar a esta opci[oó]n/iu' => 'El usuario del certificado no tiene permiso para solicitar folios de esta empresa en el SII.',
     ];
 
     private string $host;
@@ -155,7 +155,7 @@ class SiiFolios
             $anterior = ['fecha' => $m[1], 'cantidad' => (int) $m[2], 'desde' => (int) $m[3], 'hasta' => (int) $m[4]];
         }
         return [
-            'max_autorizado' => $numero('/M[aá]ximo Autorizado\s+(\d+)/i'),
+            'max_autorizado' => $numero('/M[aá]ximo Autorizado\s+(\d+)/iu'),
             'disponibles' => $numero('/Disponible\s+(\d+)/i'),
             'ultimo_timbraje' => $anterior,
         ];
