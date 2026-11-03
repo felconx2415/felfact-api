@@ -147,8 +147,64 @@ class Acciones
             'probar' => $this->probar($in),
             'certificado_info' => $this->certificadoInfo(),
             'certificado_guardar' => $this->certificadoGuardar($in),
+            'folios_consultar' => $this->foliosConsultar($in),
+            'folios_solicitar' => $this->foliosSolicitar($in),
             default => throw new RuntimeException('Acción desconocida.'),
         };
+    }
+
+    /** RUT con que se piden folios: el del token de emisor o, con el token general, el indicado. */
+    private function rutFolios(array $in): string
+    {
+        if ($this->rutEmisor !== null) {
+            return $this->rutEmisor;
+        }
+        $this->exigirRut($in['rut'] ?? '');
+        return (string) $in['rut'];
+    }
+
+    private function tipoFolios(array $in): int
+    {
+        $tipo = (int) ($in['tipo'] ?? 0);
+        if (!in_array($tipo, [33, 34, 39, 41, 46, 52, 56, 61, 110, 111, 112], true)) {
+            throw new RuntimeException('Tipo de documento inválido para folios.');
+        }
+        return $tipo;
+    }
+
+    private function siiFolios(array $in): SiiFolios
+    {
+        $c = $this->certificadoVigente();
+        return new SiiFolios($c->getCertificate(), $c->getPrivateKey(), $this->ambiente($in)->isProduction());
+    }
+
+    /** Cuántos folios autoriza el SII para el tipo, sin pedirlos (lectura). */
+    private function foliosConsultar(array $in): array
+    {
+        $sii = $this->siiFolios($in);
+        try {
+            return $sii->consultar($this->rutFolios($in), $this->tipoFolios($in)) + ['pasos' => $sii->pasos()];
+        } catch (RuntimeException $e) {
+            throw new RuntimeException($e->getMessage() . ' [pasos: ' . json_encode($sii->pasos(), JSON_UNESCAPED_SLASHES) . ']');
+        }
+    }
+
+    /** Pide folios al SII y devuelve el CAF (base64). Exige confirmar: es una solicitud real. */
+    private function foliosSolicitar(array $in): array
+    {
+        if (($in['confirmar'] ?? false) !== true) {
+            throw new RuntimeException('Para pedir folios envía "confirmar": true.');
+        }
+        $cantidad = (int) ($in['cantidad'] ?? 0);
+        if ($cantidad < 1 || $cantidad > 10000) {
+            throw new RuntimeException('Cantidad inválida.');
+        }
+        $sii = $this->siiFolios($in);
+        try {
+            return $sii->solicitar($this->rutFolios($in), $this->tipoFolios($in), $cantidad) + ['pasos' => $sii->pasos()];
+        } catch (RuntimeException $e) {
+            throw new RuntimeException($e->getMessage() . ' [pasos: ' . json_encode($sii->pasos(), JSON_UNESCAPED_SLASHES) . ']');
+        }
     }
 
     /** Datos del certificado instalado (sin conectarse al SII). */
