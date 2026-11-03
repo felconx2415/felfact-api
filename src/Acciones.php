@@ -182,6 +182,7 @@ class Acciones
     private function foliosConsultar(array $in): array
     {
         $sii = $this->siiFolios($in);
+        $sii->detalle = ($in['detalle'] ?? false) === true;
         try {
             return $sii->consultar($this->rutFolios($in), $this->tipoFolios($in)) + ['pasos' => $sii->pasos()];
         } catch (RuntimeException $e) {

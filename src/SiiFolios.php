@@ -39,8 +39,11 @@ class SiiFolios
     private string $cookies;
     private string $certArchivo;
     private string $llaveArchivo;
-    /** @var list<array{paso:string, url:string, codigo:int}> */
+    /** @var list<array<string, mixed>> */
     private array $pasos = [];
+
+    /** Diagnóstico: guarda el texto visible y los campos de cada página (para adaptar el flujo al sitio del SII) */
+    public bool $detalle = false;
 
     public function __construct(string $certPem, string $llavePem, bool $produccion)
     {
@@ -289,6 +292,15 @@ class SiiFolios
         // El sitio de timbraje responde en ISO-8859-1; el CAF (XML) se deja tal cual
         if (!str_contains($cuerpo, '<AUTORIZACION') && !mb_check_encoding($cuerpo, 'UTF-8')) {
             $cuerpo = mb_convert_encoding($cuerpo, 'UTF-8', 'ISO-8859-1');
+        }
+        // Diagnóstico (solo si se pide): texto visible, campos y botones de la página, para adaptar el flujo
+        if ($this->detalle && !str_contains($cuerpo, '<AUTORIZACION') && !str_contains($paso, 'autenticación')) {
+            $x = $this->dom($cuerpo);
+            $ultimo = array_key_last($this->pasos);
+            $this->pasos[$ultimo]['texto'] = mb_substr($this->texto($cuerpo), 0, 1500);
+            $this->pasos[$ultimo]['campos'] = $this->campos($cuerpo);
+            $this->pasos[$ultimo]['formularios'] = array_map(fn ($f) => $f->getAttribute('action'), iterator_to_array($x->query('//form')));
+            $this->pasos[$ultimo]['botones'] = array_map(fn ($b) => $b->getAttribute('name') . '=' . $b->getAttribute('value'), iterator_to_array($x->query("//input[@type='submit' or @type='button']")));
         }
         return [$cuerpo, $final];
     }
