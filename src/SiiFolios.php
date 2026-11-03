@@ -78,123 +78,113 @@ class SiiFolios
     }
 
     /**
-     * Abre la solicitud de folios hasta el paso en que el SII informa cuántos autoriza, sin pedir nada.
-     * @return array{tipo:int, max_autorizado:?int, folios_disponibles:?int, tipos_habilitados:list<int>}
+     * Abre la solicitud de folios hasta la confirmación, donde el SII informa cuántos autoriza, sin pedir nada
+     * (la confirmación no genera folios: eso ocurre recién con «Obtener Folios»).
+     * @return array{tipo:int, max_autorizado:?int, disponibles:?int, ultimo_timbraje:?array{fecha:string, cantidad:int, desde:int, hasta:int}, tipos_habilitados:list<int>}
      */
     public function consultar(string $rut, int $tipo): array
     {
-        try {
-            [$pagina, , $tipos] = $this->abrirSolicitud($rut, $tipo, 1);
-            $campos = $this->campos($pagina);
-            return [
-                'tipo' => $tipo,
-                'max_autorizado' => isset($campos['MAX_AUTOR']) ? (int) $campos['MAX_AUTOR'] : null,
-                'folios_disponibles' => isset($campos['FOLIOS_DISP']) ? (int) $campos['FOLIOS_DISP'] : null,
-                'tipos_habilitados' => $tipos,
-            ];
-        } finally {
-            $this->cerrarSesion();
-        }
+        [$pagina, , $tipos] = $this->abrirSolicitud($rut, $tipo, '');
+        return ['tipo' => $tipo] + $this->resumen($pagina) + ['tipos_habilitados' => $tipos];
     }
 
     /**
-     * Pide folios y devuelve el CAF. Pide como máximo lo que el SII autoriza en esta solicitud.
-     * @return array{tipo:int, cantidad:int, caf:string}
+     * Pide folios y devuelve el CAF. Primero consulta el máximo autorizado y pide como mucho eso.
+     * @return array{tipo:int, cantidad:int, desde:int, hasta:int, caf:string}
      */
     public function solicitar(string $rut, int $tipo, int $cantidad): array
     {
-        try {
-            [$pagina, $url] = $this->abrirSolicitud($rut, $tipo, $cantidad);
-            [$numero, $dv] = $this->rut($rut);
-            $max = $this->campos($pagina)['MAX_AUTOR'] ?? null;
-            $cantidad = max(1, $max !== null && $max !== '' ? min($cantidad, (int) $max) : $cantidad);
-
-            // Solicitar numeración
-            [$pagina, $url] = $this->enviarFormulario($pagina, $url, 'solicitar numeración', [
-                'RUT_EMP' => $numero, 'DV_EMP' => $dv, 'COD_DOCTO' => (string) $tipo, 'CANT_DOCTOS' => (string) $cantidad,
-                'ACEPTAR' => 'Solicitar Numeración',
-            ], '/cvc_cgi/dte/of_confirma_folio');
-
-            // Confirmar el folio inicial que propone el SII
-            if (str_contains($pagina, 'of_confirma_folio')) {
-                [$pagina, $url] = $this->enviarFormulario($pagina, $url, 'confirmar folio inicial', ['ACEPTAR' => 'Confirmar Folio Inicial'], '/cvc_cgi/dte/of_confirma_folio');
-            }
-
-            // Obtener folios
-            if (str_contains($pagina, 'of_genera_folio')) {
-                $campos = $this->campos($pagina);
-                $inicial = (int) ($campos['FOLIO_INI'] ?? $campos['FOLIO_INICIAL'] ?? 0);
-                $extra = ['CANT_DOCTOS' => (string) $cantidad, 'ACEPTAR' => 'Obtener Folios'];
-                if ($inicial > 0) {
-                    $extra['FOLIO_FIN'] = (string) ($inicial + $cantidad - 1);
-                }
-                [$pagina, $url] = $this->enviarFormulario($pagina, $url, 'obtener folios', $extra, '/cvc_cgi/dte/of_genera_folio');
-            }
-
-            // Descargar el archivo (el SII a veces tarda en tenerlo listo: DTE-OFGA)
-            for ($intento = 0; $intento < 4 && !str_contains($pagina, '<AUTORIZACION'); $intento++) {
-                if ($intento > 0) {
-                    sleep(3 * $intento);
-                }
-                if (!str_contains($pagina, 'of_genera_archivo') && $intento === 0) {
-                    break;
-                }
-                [$respuesta] = $this->enviarFormulario($pagina, $url, 'descargar CAF', ['ACEPTAR' => 'AQUI'], '/cvc_cgi/dte/of_genera_archivo');
-                if (str_contains($respuesta, '<AUTORIZACION')) {
-                    $pagina = $respuesta;
-                    break;
-                }
-                if (!str_contains($respuesta, 'DTE-OFGA')) {
-                    $pagina = $respuesta;
-                    break;
-                }
-            }
-
-            if (!str_contains($pagina, '<AUTORIZACION')) {
-                if (preg_match('/ya fue autorizado el rango/i', $this->texto($pagina))) {
-                    throw new RuntimeException('El SII indica que ese rango ya fue autorizado. Recupéralo desde «Reobtención de folios» en el SII.');
-                }
-                throw new RuntimeException('El SII no entregó el archivo de folios. Respuesta: ' . $this->extracto($pagina));
-            }
-            $inicio = strpos($pagina, '<?xml') !== false ? strpos($pagina, '<?xml') : strpos($pagina, '<AUTORIZACION');
-            $fin = strrpos($pagina, '</AUTORIZACION>');
-            $xml = substr($pagina, (int) $inicio, (int) $fin + strlen('</AUTORIZACION>') - (int) $inicio);
-
-            return ['tipo' => $tipo, 'cantidad' => $cantidad, 'caf' => base64_encode($xml)];
-        } finally {
-            $this->cerrarSesion();
+        // El SII calcula el máximo según el uso de los folios anteriores: si es 0, no entrega más todavía
+        [$pagina] = $this->abrirSolicitud($rut, $tipo, '');
+        $max = $this->resumen($pagina)['max_autorizado'];
+        if ($max === 0) {
+            throw new RuntimeException('El SII no autoriza más folios de este tipo por ahora (máximo autorizado 0): primero hay que usar los que ya se pidieron.');
         }
+        $cantidad = max(1, $max !== null ? min($cantidad, $max) : $cantidad);
+
+        // Confirmación con la cantidad: el SII propone el rango (FOLIO_INI y FOLIO_FIN)
+        [$pagina, $url] = $this->abrirSolicitud($rut, $tipo, (string) $cantidad);
+        $campos = $this->campos($pagina);
+        $desde = (int) ($campos['FOLIO_INI'] ?? 0);
+        $hasta = (int) ($campos['FOLIO_FIN'] ?? 0);
+        if ($desde < 1 || $hasta < $desde) {
+            throw new RuntimeException('El SII no propuso un rango de folios. Respuesta: ' . $this->extracto($pagina));
+        }
+
+        // Obtener Folios: aquí el SII autoriza el rango
+        [$pagina, $url] = $this->enviarFormulario($pagina, $url, 'obtener folios', ['ACEPTAR' => 'Obtener Folios'], '/cvc_cgi/dte/of_genera_folio');
+
+        // Descargar el archivo (el SII a veces tarda en tenerlo listo: DTE-OFGA)
+        for ($intento = 0; $intento < 4 && !str_contains($pagina, '<AUTORIZACION'); $intento++) {
+            if ($intento > 0) {
+                sleep(3 * $intento);
+            }
+            if (!str_contains($pagina, 'of_genera_archivo')) {
+                break;
+            }
+            [$respuesta] = $this->enviarFormulario($pagina, $url, 'descargar CAF', ['ACEPTAR' => 'AQUI'], '/cvc_cgi/dte/of_genera_archivo');
+            if (str_contains($respuesta, '<AUTORIZACION') || !str_contains($respuesta, 'DTE-OFGA')) {
+                $pagina = $respuesta;
+                break;
+            }
+        }
+
+        if (!str_contains($pagina, '<AUTORIZACION')) {
+            if (preg_match('/ya fue autorizado el rango/i', $this->texto($pagina))) {
+                throw new RuntimeException("El SII ya autorizó el rango {$desde}-{$hasta} pero no entregó el archivo. Descárgalo desde «Reobtención de folios» en el SII.");
+            }
+            throw new RuntimeException("El SII no entregó el archivo de folios (rango {$desde}-{$hasta}). Respuesta: " . $this->extracto($pagina));
+        }
+        $inicio = strpos($pagina, '<?xml') !== false ? strpos($pagina, '<?xml') : strpos($pagina, '<AUTORIZACION');
+        $fin = strrpos($pagina, '</AUTORIZACION>');
+        $xml = substr($pagina, (int) $inicio, (int) $fin + strlen('</AUTORIZACION>') - (int) $inicio);
+
+        return ['tipo' => $tipo, 'cantidad' => $hasta - $desde + 1, 'desde' => $desde, 'hasta' => $hasta, 'caf' => base64_encode($xml)];
     }
 
     /**
-     * Entra con el certificado y avanza hasta la página que muestra el máximo autorizado para el tipo.
+     * Lo que muestra la confirmación: disponibles, máximo autorizado y el último timbraje.
+     * @return array{max_autorizado:?int, disponibles:?int, ultimo_timbraje:?array{fecha:string, cantidad:int, desde:int, hasta:int}}
+     */
+    private function resumen(string $pagina): array
+    {
+        $texto = $this->texto($pagina);
+        $numero = fn (string $patron) => preg_match($patron, $texto, $m) ? (int) $m[1] : null;
+        $anterior = null;
+        if (preg_match('/Timbraje Anterior:\s*Fecha Timbraje\s+(\S+).*?Cantidad Timbrada\s+(\d+)\s+Folio Inicial\s+(\d+)\s+Folio Final\s+(\d+)/i', $texto, $m)) {
+            $anterior = ['fecha' => $m[1], 'cantidad' => (int) $m[2], 'desde' => (int) $m[3], 'hasta' => (int) $m[4]];
+        }
+        return [
+            'max_autorizado' => $numero('/M[aá]ximo Autorizado\s+(\d+)/i'),
+            'disponibles' => $numero('/Disponible\s+(\d+)/i'),
+            'ultimo_timbraje' => $anterior,
+        ];
+    }
+
+    /**
+     * Entra con el certificado, indica la empresa, el tipo y la cantidad, y llega a la confirmación.
+     * Con cantidad vacía la confirmación solo informa (no se piden folios).
      * @return array{0:string, 1:string, 2:list<int>} página, su URL y tipos habilitados
      */
-    private function abrirSolicitud(string $rut, int $tipo, int $cantidad): array
+    private function abrirSolicitud(string $rut, int $tipo, string $cantidad): array
     {
         [$numero, $dv] = $this->rut($rut);
         [$pagina, $url] = $this->sesion('/cvc_cgi/dte/of_solicita_folios');
 
         // Paso 1: RUT de la empresa
-        [$pagina, $url] = $this->enviarFormulario($pagina, $url, 'empresa', [
-            'RUT_EMP' => $numero, 'DV_EMP' => $dv, 'COD_DOCTO' => (string) $tipo, 'CANTIDAD' => (string) $cantidad,
-        ], '/cvc_cgi/dte/of_solicita_folios');
+        [$pagina, $url] = $this->enviarFormulario($pagina, $url, 'empresa', ['RUT_EMP' => $numero, 'DV_EMP' => $dv, 'ACEPTAR' => 'Continuar'], '/cvc_cgi/dte/of_solicita_folios_dcto');
 
-        if (str_contains($pagina, 'of_solicita_folios_dcto') && !$this->tieneSelect($pagina, 'COD_DOCTO')) {
-            [$pagina, $url] = $this->enviarFormulario($pagina, $url, 'documentos', ['RUT_EMP' => $numero, 'DV_EMP' => $dv], '/cvc_cgi/dte/of_solicita_folios_dcto');
+        // Paso 2: tipo de documento y cantidad (solo los tipos que el SII habilita para la empresa)
+        if (!$this->tieneSelect($pagina, 'COD_DOCTO')) {
+            throw new RuntimeException('El SII no mostró los documentos a timbrar. Respuesta: ' . $this->extracto($pagina));
         }
-
-        // Paso 2: tipo de documento (solo los que el SII habilita para la empresa)
-        $tipos = [];
-        if ($this->tieneSelect($pagina, 'COD_DOCTO')) {
-            $tipos = $this->opciones($pagina, 'COD_DOCTO');
-            if (!in_array($tipo, $tipos, true)) {
-                throw new RuntimeException("El SII no habilita timbraje del tipo {$tipo} para esta empresa (habilitados: " . ($tipos ? implode(', ', $tipos) : 'ninguno') . ').');
-            }
-            [$pagina, $url] = $this->enviarFormulario($pagina, $url, 'tipo de documento', [
-                'RUT_EMP' => $numero, 'DV_EMP' => $dv, 'COD_DOCTO' => (string) $tipo, 'CANT_DOCTOS' => '',
-            ], '/cvc_cgi/dte/of_solicita_folios_dcto');
+        $tipos = $this->opciones($pagina, 'COD_DOCTO');
+        if (!in_array($tipo, $tipos, true)) {
+            throw new RuntimeException("El SII no habilita timbraje del tipo {$tipo} para esta empresa (habilitados: " . ($tipos ? implode(', ', $tipos) : 'ninguno') . ').');
         }
+        [$pagina, $url] = $this->enviarFormulario($pagina, $url, $cantidad === '' ? 'consultar máximo' : 'solicitar numeración', [
+            'RUT_EMP' => $numero, 'DV_EMP' => $dv, 'COD_DOCTO' => (string) $tipo, 'CANT_DOCTOS' => $cantidad, 'ACEPTAR' => 'Solicitar Numeración',
+        ], '/cvc_cgi/dte/of_confirma_folio');
 
         return [$pagina, $url, $tipos];
     }
@@ -305,16 +295,6 @@ class SiiFolios
         return [$cuerpo, $final];
     }
 
-    private function cerrarSesion(): void
-    {
-        foreach (["https://{$this->host}/cgi_AUT2000/autLogout.cgi", 'https://herculesr.sii.cl/cgi_AUT2000/autLogout.cgi'] as $salida) {
-            try {
-                $this->http('GET', $salida, null, 'cerrar sesión');
-            } catch (RuntimeException) {
-                // cerrar la sesión es una cortesía con el SII: si falla, la sesión vence sola
-            }
-        }
-    }
 
     /** @return array{0:string, 1:string} número y dígito verificador */
     private function rut(string $rut): array
