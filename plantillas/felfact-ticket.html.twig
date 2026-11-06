@@ -78,11 +78,11 @@
     {% if E.IdDoc.PeriodoDesde is not empty and E.IdDoc.PeriodoHasta is not empty %}<tr><td class="b">Período</td><td class="r">{{ E.IdDoc.PeriodoDesde | date('d/m/Y') }} al {{ E.IdDoc.PeriodoHasta | date('d/m/Y') }}</td></tr>{% endif %}
     {% if E.IdDoc.FmaPago is not empty %}<tr><td class="b">Pago</td><td class="r">{{ E.IdDoc.FmaPago | format_as('billing_document.FmaPago') }}</td></tr>{% endif %}
 </table>
-{% set conReceptor = E.Receptor.RznSocRecep is not empty or (E.Receptor.RUTRecep is not empty and E.Receptor.RUTRecep != '66666666-6') %}
+{% set conReceptor = (E.Receptor.RznSocRecep is not empty and E.Receptor.RznSocRecep != '66666666-6') or (E.Receptor.RUTRecep is not empty and E.Receptor.RUTRecep != '66666666-6') %}
 {% if conReceptor %}
 <div class="sep"></div>
 <table>
-    {% if E.Receptor.RznSocRecep is not empty %}<tr><td class="b" style="width: 30%;">Cliente</td><td>{{ E.Receptor.RznSocRecep }}</td></tr>{% endif %}
+    {% if E.Receptor.RznSocRecep is not empty and E.Receptor.RznSocRecep != '66666666-6' %}<tr><td class="b" style="width: 30%;">Cliente</td><td>{{ E.Receptor.RznSocRecep }}</td></tr>{% endif %}
     {% if E.Receptor.RUTRecep is not empty and E.Receptor.RUTRecep != '66666666-6' %}<tr><td class="b">R.U.T.</td><td>{{ E.Receptor.RUTRecep | format_as('billing_document.RUTRecep') }}</td></tr>{% endif %}
     {% if E.Receptor.GiroRecep is not empty %}<tr><td class="b">Giro</td><td>{{ E.Receptor.GiroRecep }}</td></tr>{% endif %}
     {% if E.Receptor.DirRecep is not empty %}<tr><td class="b">Dirección</td><td>{{ [E.Receptor.DirRecep, E.Receptor.CmnaRecep] | filter(v => v is not empty) | join(', ') }}</td></tr>{% endif %}
@@ -174,7 +174,7 @@
 {% endif %}
 
 <div class="sep"></div>
-<div class="c chico">Emitido con <b>FelFact</b>{% if R.web is defined and R.web %} · {{ R.web }}{% endif %}</div>
+<div class="c chico">Emitido con <b>{{ (R.tema ?? '') == 'felfacto' ? 'FelFacto' : 'FelFact' }}</b>{% if R.web is defined and R.web %} · {{ R.web }}{% endif %}</div>
 
 </body>
 </html>

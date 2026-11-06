@@ -1,10 +1,11 @@
 {#
   Plantilla FelFact (FelServ) para DTE: facturas, boletas y notas de crédito/débito.
-  Diseño con los colores de felserv.cl; respeta lo exigido por el SII en la representación
+  Dos temas (options.renderer.tema): 'felfacto' (petróleo, verde y turquesa de felfacto.cl) y
+  'felserv' (azules de felserv.cl). Respeta lo exigido por el SII en la representación
   impresa: recuadro rojo con RUT, tipo y folio, unidad del SII bajo el recuadro, timbre
   electrónico con la resolución, acuse de recibo y leyenda CEDIBLE en la copia cedible.
   Variables: document, document_stamp, document_auth y options.renderer (logo, marca, web,
-  sii_unidad, verificacion, presentation), que entrega la API (Acciones::opcionesPdf).
+  sii_unidad, verificacion, presentation, tema), que entrega la API (Acciones::opcionesPdf).
   Las boletas no se verifican en el SII: se imprime el sitio de verificación del emisor (verificacion).
 #}
 {% set E = document.Encabezado %}
@@ -13,6 +14,13 @@
 {% set esCedible = R.presentation is defined and R.presentation == 'cedible' %}
 {% set otraMoneda = E.Totales.TpoMoneda is not empty and E.Totales.TpoMoneda == 'DOLAR USA' %}
 {% set EM = R.emisor ?? {} %}
+{# Colores del tema: fuerte (títulos), principal (cabecera del detalle), total, acento, fondo y borde.
+   El recuadro del SII va siempre en rojo. #}
+{% set temas = {
+    'felfacto': {fuerte: '#0b3c5d', principal: '#0f766e', total: '#0b3c5d', acento: '#0d8f78', barra: 'linear-gradient(90deg, #0b3c5d, #0f766e 55%, #1abc9c)', fondo: '#f1f8f6', borde: '#d9ebe6', tenue: '#5b6b75', tinta: '#0b2233', producto: 'FelFacto'},
+    'felserv': {fuerte: '#0047b3', principal: '#0066ff', total: '#0066ff', acento: '#0066ff', barra: 'linear-gradient(90deg, #0047b3, #0066ff 50%, #00e5ff)', fondo: '#f3f5f8', borde: '#e1e4ea', tenue: '#5a6270', tinta: '#1e1e1e', producto: 'FelFact'}
+} %}
+{% set C = temas[R.tema ?? 'felserv'] ?? temas['felserv'] %}
 {# Hora de emisión: la de la firma del documento (TmstFirma) #}
 {% set hora = (document_xml is defined and '<TmstFirma>' in document_xml) ? (document_xml | split('<TmstFirma>') | last | split('</TmstFirma>') | first) : null %}
 {% macro n(v, dec) %}{{ v | number_format(dec ?? 0, ',', '.') }}{% endmacro %}
@@ -22,11 +30,11 @@
 <head>
 <meta charset="utf-8">
 <style>
-    body { font-family: Arial, sans-serif; font-size: 9pt; color: #1e1e1e; margin: 0; padding: 0; }
+    body { font-family: Arial, sans-serif; font-size: 9pt; color: {{ C.tinta }}; margin: 0; padding: 0; }
     p { margin: 0; }
     table { border-collapse: collapse; }
     .ancho { width: 100%; }
-    .tenue { color: #5a6270; }
+    .tenue { color: {{ C.tenue }}; }
     .r { text-align: right; }
     .c { text-align: center; }
 
@@ -35,34 +43,34 @@
     .cab-der { float: right; width: 40%; }
     .marca-img { height: 13mm; max-width: 80mm; }
     .marca-txt { padding-left: 3mm; vertical-align: middle; }
-    .marca-nombre { font-size: 17pt; font-weight: bold; color: #1e1e1e; }
-    .marca-web { font-size: 8pt; color: #0066ff; font-weight: bold; }
-    .razon { font-size: 12.5pt; font-weight: bold; color: #0047b3; margin-top: 3mm; }
+    .marca-nombre { font-size: 17pt; font-weight: bold; color: {{ C.fuerte }}; }
+    .marca-web { font-size: 8pt; color: {{ C.acento }}; font-weight: bold; }
+    .razon { font-size: 12.5pt; font-weight: bold; color: {{ C.fuerte }}; margin-top: 3mm; }
     .giro { font-size: 8pt; font-weight: bold; text-transform: uppercase; margin-top: 1mm; }
-    .dir { font-size: 8pt; color: #5a6270; margin-top: 1mm; }
+    .dir { font-size: 8pt; color: {{ C.tenue }}; margin-top: 1mm; }
     .recuadro { border: 0.7mm solid #e3000f; color: #e3000f; text-align: center; font-weight: bold; padding: 2.5mm 2mm; }
     .recuadro .rut { font-size: 13pt; }
     .recuadro .tipo { font-size: 11.5pt; text-transform: uppercase; padding: 1.5mm 0; }
     .recuadro .folio { font-size: 13pt; }
     .sucursal { color: #e3000f; font-weight: bold; text-align: center; font-size: 9.5pt; margin-top: 2mm; text-transform: uppercase; }
-    .barra { height: 1.2mm; background: linear-gradient(90deg, #0047b3, #0066ff 50%, #00e5ff); margin: 4mm 0 3.5mm 0; }
+    .barra { height: 1.2mm; background: {{ C.barra }}; margin: 4mm 0 3.5mm 0; }
 
     /* Cajas */
-    .caja { border: 0.3mm solid #e1e4ea; border-radius: 2.5mm; padding: 2mm 3mm; }
+    .caja { border: 0.3mm solid {{ C.borde }}; border-radius: 2.5mm; padding: 2mm 3mm; }
     .datos td { padding: 1mm 1mm; vertical-align: top; font-size: 8.5pt; }
-    .et { font-weight: bold; color: #1e1e1e; white-space: nowrap; }
-    .dp { color: #5a6270; }
+    .et { font-weight: bold; color: {{ C.tinta }}; white-space: nowrap; }
+    .dp { color: {{ C.tenue }}; }
 
     /* Detalle */
-    .caja-det { border: 0.3mm solid #e1e4ea; margin-top: 3.5mm; padding: 0; }
+    .caja-det { border: 0.3mm solid {{ C.borde }}; margin-top: 3.5mm; padding: 0; }
     .detalle td.relleno { border-bottom: none; }
-    .detalle th { background-color: #0066ff; color: #ffffff; font-weight: bold; font-size: 8.5pt; padding: 1.8mm 1.5mm; text-align: left; }
-    .detalle td { padding: 1.6mm 1.5mm; border-bottom: 0.2mm solid #e1e4ea; font-size: 8.5pt; vertical-align: top; }
+    .detalle th { background-color: {{ C.principal }}; color: #ffffff; font-weight: bold; font-size: 8.5pt; padding: 1.8mm 1.5mm; text-align: left; }
+    .detalle td { padding: 1.6mm 1.5mm; border-bottom: 0.2mm solid {{ C.borde }}; font-size: 8.5pt; vertical-align: top; }
     .detalle th.r { text-align: right; }
     .detalle th.c { text-align: center; }
-    .detalle tr.par td { background-color: #f3f5f8; }
-    .dsc-item { font-size: 7pt; color: #5a6270; }
-    .ex { font-size: 7pt; font-weight: bold; color: #0047b3; }
+    .detalle tr.par td { background-color: {{ C.fondo }}; }
+    .dsc-item { font-size: 7pt; color: {{ C.tenue }}; }
+    .ex { font-size: 7pt; font-weight: bold; color: {{ C.fuerte }}; }
     .globales td { padding: 1mm 1.5mm; font-size: 8.5pt; }
 
     /* Pie del documento */
@@ -70,20 +78,20 @@
     .col-izq { float: left; width: 33%; margin-right: 4%; }
     .col-centro { float: left; width: 29%; margin-right: 4%; }
     .col-der { float: right; width: 30%; }
-    .titulo-caja { font-weight: bold; font-size: 8pt; color: #0047b3; text-transform: uppercase; padding-bottom: 1mm; }
+    .titulo-caja { font-weight: bold; font-size: 8pt; color: {{ C.principal }}; text-transform: uppercase; padding-bottom: 1mm; }
     .refs td { font-size: 7.5pt; padding: 0.6mm 0; vertical-align: top; }
     .timbre { margin-top: 3mm; text-align: center; }
     .img-timbre { width: 60mm; height: 30mm; }
     .timbre-txt { font-size: 7.5pt; text-align: center; line-height: 1.25; }
-    .acuse td { font-size: 8pt; padding: 1.4mm 1mm; border-bottom: 0.2mm solid #e1e4ea; }
-    .acuse .acuse-t { background-color: #f3f5f8; font-weight: bold; text-align: center; border-bottom: 0.2mm solid #e1e4ea; }
-    .acuse-ley { font-size: 6.5pt; color: #5a6270; text-align: left; margin-top: 1.5mm; }
-    .totales td { font-size: 9pt; padding: 1.4mm 2mm; border-bottom: 0.2mm solid #e1e4ea; }
-    .totales .total td { background-color: #0066ff; color: #ffffff; font-weight: bold; font-size: 10.5pt; border-bottom: none; }
-    .cedible { font-size: 12pt; font-weight: bold; text-align: right; margin-top: 4mm; letter-spacing: 1px; }
+    .acuse td { font-size: 8pt; padding: 1.4mm 1mm; border-bottom: 0.2mm solid {{ C.borde }}; }
+    .acuse .acuse-t { background-color: {{ C.fondo }}; color: {{ C.fuerte }}; font-weight: bold; text-align: center; border-bottom: 0.2mm solid {{ C.borde }}; }
+    .acuse-ley { font-size: 6.5pt; color: {{ C.tenue }}; text-align: left; margin-top: 1.5mm; }
+    .totales td { font-size: 9pt; padding: 1.4mm 2mm; border-bottom: 0.2mm solid {{ C.borde }}; }
+    .totales .total td { background-color: {{ C.total }}; color: #ffffff; font-weight: bold; font-size: 10.5pt; border-bottom: none; }
+    .cedible { font-size: 12pt; font-weight: bold; color: {{ C.fuerte }}; text-align: right; margin-top: 4mm; letter-spacing: 1px; }
     .obs { font-size: 8pt; margin-top: 3mm; }
-    .pie { position: fixed; bottom: 3mm; left: 5mm; right: 5mm; border-top: 0.2mm solid #e1e4ea; padding-top: 1.5mm; font-size: 7pt; color: #5a6270; }
-    .pie b { color: #0066ff; }
+    .pie { position: fixed; bottom: 3mm; left: 5mm; right: 5mm; border-top: 0.2mm solid {{ C.borde }}; padding-top: 1.5mm; font-size: 7pt; color: {{ C.tenue }}; }
+    .pie b { color: {{ C.principal }}; }
 </style>
 </head>
 <body>
@@ -122,7 +130,7 @@
 
 {# ---------- Receptor y datos del documento ---------- #}
 {% set izq = [] %}
-{% if E.Receptor.RznSocRecep is not empty %}{% set izq = izq | merge([['Señor(es)', E.Receptor.RznSocRecep]]) %}{% endif %}
+{% if E.Receptor.RznSocRecep is not empty and E.Receptor.RznSocRecep != '66666666-6' %}{% set izq = izq | merge([['Señor(es)', E.Receptor.RznSocRecep]]) %}{% endif %}
 {% if E.Receptor.RUTRecep is not empty and E.Receptor.RUTRecep != '66666666-6' %}{% set izq = izq | merge([['R.U.T.', E.Receptor.RUTRecep | format_as('billing_document.RUTRecep')]]) %}{% endif %}
 {% if E.Receptor.GiroRecep is not empty %}{% set izq = izq | merge([['Giro', E.Receptor.GiroRecep]]) %}{% endif %}
 {% if E.Receptor.DirRecep is not empty %}{% set izq = izq | merge([['Dirección', E.Receptor.DirRecep]]) %}{% endif %}
@@ -294,7 +302,7 @@
 
 <div class="pie">
     <table class="ancho"><tr>
-        <td>Documento tributario electrónico emitido con <b>FelFact</b></td>
+        <td>Documento tributario electrónico emitido con <b>{{ C.producto }}</b></td>
         <td class="r">{{ R.web ?? '' }}</td>
     </tr></table>
 </div>

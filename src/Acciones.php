@@ -600,6 +600,9 @@ class Acciones
             // Sitio donde se verifican las boletas (lo exige el SII en su representación impresa)
             $opciones->set('renderer.verificacion', mb_substr(trim((string) ($in['pdf_verificacion'] ?? '')), 0, 80, 'UTF-8'));
         }
+        // Colores del PDF: 'felfacto' (por defecto para los emisores) o 'felserv' (token general, WHMCS)
+        $tema = (string) ($in['pdf_tema'] ?? '');
+        $opciones->set('renderer.tema', in_array($tema, ['felfacto', 'felserv'], true) ? $tema : ($this->rutEmisor === null ? 'felserv' : 'felfacto'));
         $unidad = trim((string) ($in['sii_unidad'] ?? ''));
         if ($unidad !== '') {
             $opciones->set('renderer.sii_unidad', mb_strtoupper(mb_substr($unidad, 0, 40, 'UTF-8'), 'UTF-8'));
