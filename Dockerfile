@@ -2,8 +2,9 @@
 # Multiarquitectura.
 FROM php:8.5-apache
 
-RUN apt-get update \
- && apt-get install -y --no-install-recommends libxml2-dev libpng-dev libjpeg62-turbo-dev libfreetype6-dev libicu-dev libzip-dev unzip \
+# Reintentos: a veces no hay conexión con deb.debian.org y la compilación fallaba
+RUN apt-get -o Acquire::Retries=5 update \
+ && apt-get -o Acquire::Retries=5 install -y --no-install-recommends libxml2-dev libpng-dev libjpeg62-turbo-dev libfreetype6-dev libicu-dev libzip-dev unzip \
  && docker-php-ext-configure gd --with-freetype --with-jpeg \
  && docker-php-ext-install -j"$(nproc)" soap gd intl bcmath zip \
  && rm -rf /var/lib/apt/lists/*
